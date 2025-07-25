@@ -1,0 +1,1389 @@
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
+const GEMINI_API_KEY = ""; // Replace with your actual Gemini API key
+
+const SYSTEM_PROMPT = `
+SYSTEM INSTRUCTIONS:
+You are a professional Nepal tourism content generator. Your responses must be accurate, well-researched, and formatted as clean JSON without any conversational elements.
+
+STRICT CONTENT RESTRICTIONS:
+- ONLY respond to queries about Nepal tourism (places, attractions, travel information, cultural sites, activities)
+- For any non-Nepal tourism topics, respond with: {"error": "This service only provides information about Nepal tourism destinations and travel"}
+- Do not include emojis, casual language, or conversational phrases
+- Do not start responses with phrases like "Here's your guide" or "I hope this helps"
+
+RESPONSE FORMAT REQUIREMENTS:
+- All responses must be valid JSON format
+- Use professional, informative tone
+- Include accurate, current information
+- Verify all details before including them
+- Structure content with clear sections
+
+JSON STRUCTURE TEMPLATE:
+{
+  "destination": "destination_name",
+  "personalized_greeting": "Welcome [USER_NAME], tailored introduction based on user background and interests",
+  "overview": "brief_description",
+  "location": {
+    "distance_from_kathmandu": "distance_info",
+    "transportation": ["transport_options"]
+  },
+  "entry_information": {
+    "foreign_national_fee": "fee_in_npr_and_usd",
+    "access_restrictions": "any_restrictions",
+    "visiting_hours": "operating_hours"
+  },
+  "key_experiences": [
+    {
+      "activity": "activity_name",
+      "timing": "best_time_to_visit",
+      "description": "detailed_description"
+    }
+  ],
+  "cultural_significance": "cultural_and_historical_context",
+  "visitor_guidelines": [
+    "guideline_1",
+    "guideline_2",
+    "guideline_3"
+  ],
+  "estimated_budget_cad": {
+    "entry_fee": "amount",
+    "transportation": "amount_range",
+    "guide_optional": "amount_range",
+    "total_estimate": "total_range"
+  },
+  "best_visiting_time": "recommended_time_period",
+  "special_notes": "additional_important_information",
+  "interest_alignment": {
+    "applicable": true/false,
+    "matching_activities": ["activity_1", "activity_2"] or null,
+    "why_it_matches": "explanation_of_connection" or null,
+    "personalized_recommendation": "tailored advice based on user's specific background and interests" or null
+  },
+  "personal_connection": "explanation of why this destination will resonate with the user's background, interests, or travel style"
+}
+
+PERSONALIZATION REQUIREMENTS:
+- Address user by name in personalized_greeting
+- Reference user's country of origin, interests, and background where relevant
+- Tailor recommendations based on user's specific profile
+- Make connections between user's interests and destination features
+- Use inclusive language that makes the user feel the content was created specifically for them
+- Include practical advice relevant to user's background (currency conversions to their home country, cultural context for their nationality)
+
+INTEREST-BASED CONTENT RULES:
+- Only include "interest_alignment" section if the destination genuinely offers activities/experiences that match the specified visitor interests
+- Set "applicable": false if no meaningful connection exists
+- Be honest about limitations - not every place suits every interest
+- Examples of interest categories: adventure sports, spiritual experiences, cultural immersion, nature photography, trekking, wildlife, historical exploration, local cuisine, traditional crafts
+- Only claim interest alignment if specific, verifiable activities exist at the destination
+- Include personalized_recommendation only when interest alignment is applicable
+
+VERIFICATION REQUIREMENTS:
+- Verify all prices, timings, and access information
+- Confirm transportation options are current
+- Validate cultural and historical information
+- Check entry fees and restrictions
+- Ensure budget estimates reflect current rates
+`;
+
+const API_URL = 'http://localhost:3000';
+
+function GuideDisplay({ data }) {
+  if (!data) return null;
+  let parsed;
+  let raw = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  if (typeof data === 'string') {
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      // Try to extract JSON block
+      const firstBrace = data.indexOf('{');
+      const lastBrace = data.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        const jsonBlock = data.substring(firstBrace, lastBrace + 1);
+        try {
+          parsed = JSON.parse(jsonBlock);
+        } catch {
+          // Still invalid
+        }
+      }
+    }
+  } else {
+    parsed = data;
+  }
+  if (!parsed) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+        <div className="text-red-600 font-semibold mb-2">Invalid JSON response</div>
+        <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">{raw}</pre>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+      <h3 className="text-2xl font-bold text-blue-700 mb-2">{parsed.destination}</h3>
+      <p className="italic text-lg mb-4">{parsed.personalized_greeting}</p>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Overview</h4>
+        <p>{parsed.overview}</p>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Location</h4>
+        <p><b>Distance from Kathmandu:</b> {parsed.location?.distance_from_kathmandu}</p>
+        <p><b>Transportation:</b> {parsed.location?.transportation?.join(', ')}</p>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Entry Information</h4>
+        <ul className="list-disc ml-6">
+          <li><b>Foreign National Fee:</b> {parsed.entry_information?.foreign_national_fee}</li>
+          <li><b>Access Restrictions:</b> {parsed.entry_information?.access_restrictions}</li>
+          <li><b>Visiting Hours:</b> {parsed.entry_information?.visiting_hours}</li>
+        </ul>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Key Experiences</h4>
+        <ul className="list-disc ml-6">
+          {parsed.key_experiences?.map((exp, i) => (
+            <li key={i} className="mb-2">
+              <b>{exp.activity}</b> <span className="text-sm text-gray-500">({exp.timing})</span>
+              <div>{exp.description}</div>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Cultural Significance</h4>
+        <p>{parsed.cultural_significance}</p>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Visitor Guidelines</h4>
+        <ul className="list-disc ml-6">
+          {parsed.visitor_guidelines?.map((g, i) => <li key={i}>{g}</li>)}
+        </ul>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Estimated Budget (CAD)</h4>
+        <ul className="list-disc ml-6">
+          <li><b>Entry Fee:</b> {parsed.estimated_budget_cad?.entry_fee}</li>
+          <li><b>Transportation:</b> {parsed.estimated_budget_cad?.transportation}</li>
+          <li><b>Guide (Optional):</b> {parsed.estimated_budget_cad?.guide_optional}</li>
+          <li><b>Total Estimate:</b> {parsed.estimated_budget_cad?.total_estimate}</li>
+        </ul>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Best Visiting Time</h4>
+        <p>{parsed.best_visiting_time}</p>
+      </section>
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Special Notes</h4>
+        <p>{parsed.special_notes}</p>
+      </section>
+      {parsed.interest_alignment && (
+        <section className="mb-4">
+          <h4 className="font-semibold text-gray-800">Interest Alignment</h4>
+          <ul className="list-disc ml-6">
+            <li><b>Applicable:</b> {parsed.interest_alignment.applicable ? 'Yes' : 'No'}</li>
+            {parsed.interest_alignment.matching_activities && <li><b>Matching Activities:</b> {parsed.interest_alignment.matching_activities.join(', ')}</li>}
+            {parsed.interest_alignment.why_it_matches && <li><b>Why it matches:</b> {parsed.interest_alignment.why_it_matches}</li>}
+            {parsed.interest_alignment.personalized_recommendation && <li><b>Personalized Recommendation:</b> {parsed.interest_alignment.personalized_recommendation}</li>}
+          </ul>
+        </section>
+      )}
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800">Personal Connection</h4>
+        <p>{parsed.personal_connection}</p>
+      </section>
+    </div>
+  );
+}
+
+export default function SearchPage() {
+  const [user, setUser] = useState({ name: '', country: '' });
+  const [userInterests, setUserInterests] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState('');
+  const [destination, setDestination] = useState('');
+  const [response, setResponse] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const fetchUserAndInterests = async () => {
+      const token = localStorage.getItem('token');
+      const userId = localStorage.getItem('userId');
+      if (!token || !userId) return;
+      try {
+        // Fetch user info
+        const userRes = await axios.get(`${API_URL}/api/user/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setUser({ name: userRes.data.name, country: userRes.data.country });
+        // Fetch user interests
+        const intRes = await axios.get(`${API_URL}/api/preference/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setUserInterests(intRes.data?.interest || []);
+      } catch (err) {
+        setError('Failed to fetch user info or interests');
+      }
+    };
+    fetchUserAndInterests();
+  }, []);
+
+  const handleSubmit = async e => {
+    e.preventDefault();
+    setError("");
+    setResponse("");
+    setLoading(true);
+    const interestsString = userInterests.join(', ');
+    const fullPrompt = `${SYSTEM_PROMPT}\n\nBased on the above instructions and format, provide detailed tourism information for a user currently in ${currentLocation} who wants to go to ${destination} in Nepal. The user's name is ${user.name}, from ${user.country}, interested in ${interestsString}. Include personalized content that makes the user feel the guide was created specifically for them. Only include interest alignment if the destination genuinely offers relevant experiences. Include accurate, verified information formatted as clean JSON without any conversational elements or emojis.`;
+    const payload = {
+      contents: [{
+        parts: [{ text: fullPrompt }]
+      }],
+      generationConfig: {
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 2048,
+      }
+    };
+    try {
+      const res = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setResponse(JSON.stringify(data, null, 2));
+        setLoading(false);
+        return;
+      }
+      const output = data?.candidates?.[0]?.content?.parts?.[0]?.text || "No response.";
+      setResponse(output);
+    } catch (err) {
+      setResponse(
+        JSON.stringify({
+          error: "Failed to fetch response from Gemini. Please check your API key and network connection.",
+          details: typeof err === "object" && err !== null && "message" in err ? err.message : String(err)
+        }, null, 2)
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto p-8 bg-gray-50 min-h-screen">
+      <h2 className="text-3xl font-bold text-center text-gray-800 mb-8">
+        Nepal Tourism Content Generator
+      </h2>
+      <div className="bg-white p-6 rounded-lg shadow-md mb-6">
+        <div className="grid gap-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Current Location:
+            </label>
+            <input
+              type="text"
+              value={currentLocation}
+              onChange={e => setCurrentLocation(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="e.g., Kathmandu, Delhi, London"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Destination in Nepal:
+            </label>
+            <input
+              type="text"
+              value={destination}
+              onChange={e => setDestination(e.target.value)}
+              className="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="e.g., Thamel, Pokhara, Everest Base Camp"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Your Name:
+            </label>
+            <input
+              type="text"
+              value={user.name}
+              disabled
+              className="w-full p-3 border border-gray-300 rounded-md bg-gray-100"
+              placeholder="Enter your name"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Country of Origin:
+            </label>
+            <input
+              type="text"
+              value={user.country}
+              disabled
+              className="w-full p-3 border border-gray-300 rounded-md bg-gray-100"
+              placeholder="e.g., Canada, USA, UK"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              Interests:
+            </label>
+            <input
+              type="text"
+              value={userInterests.join(', ')}
+              disabled
+              className="w-full p-3 border border-gray-300 rounded-md bg-gray-100"
+              placeholder="e.g., trekking, photography, cultural sites, adventure sports"
+            />
+          </div>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !destination}
+            className={`w-full py-3 px-6 rounded-md font-semibold text-white transition-colors ${
+              loading 
+                ? 'bg-gray-400 cursor-not-allowed' 
+                : 'bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-500'
+            }`}
+          >
+            {loading ? "Generating..." : "Generate Personalized Guide"}
+          </button>
+        </div>
+      </div>
+      {response && <GuideDisplay data={response} />}
+      {error && <div className="text-red-600 mt-2">{error}</div>}
+    </div>
+  );
+} 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
+const GEMINI_SEARCH_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
+const SYSTEM_PROMPT = `
+SYSTEM INSTRUCTIONS:
+You are a professional Nepal tourism content generator. Your responses must be accurate, well-researched, and formatted as clean JSON without any conversational elements.
+
+STRICT CONTENT RESTRICTIONS:
+- ONLY respond to queries about Nepal tourism (places, attractions, travel information, cultural sites, activities)
+- For any non-Nepal tourism topics, respond with: {"error": "This service only provides information about Nepal tourism destinations and travel"}
+- Do not include emojis, casual language, or conversational phrases
+- Do not start responses with phrases like "Here's your guide" or "I hope this helps"
+
+RESPONSE FORMAT REQUIREMENTS:
+- All responses must be valid JSON format
+- Use professional, informative tone
+- Include accurate, current information
+- Verify all details before including them
+- Structure content with clear sections
+
+CURRENCY AND LOCALIZATION REQUIREMENTS:
+- Convert budget estimates to the user's home country currency
+- For unrecognized countries, use USD and include "currency_note"
+- Never use CAD unless the user is specifically from Canada
+- Use "estimated_budget" as the key (never "estimated_budget_cad")
+- Include practical advice relevant to user's nationality
+
+TRANSPORTATION ACCURACY:
+- Only mention ride-sharing/transport apps actually available in Nepal (e.g., Pathao)
+- Do NOT mention Uber, Lyft, or other unavailable services
+- Include accurate local transportation options (local buses, micro-buses, taxis, private vehicles)
+
+JSON STRUCTURE TEMPLATE:
+{
+  "destination": "destination_name",
+  "personalized_greeting": "Welcome [USER_NAME], tailored introduction based on user background and interests",
+  "overview": "brief_description",
+  "location": {
+    "distance_from_kathmandu": "distance_info",
+    "transportation": ["accurate_local_transport_options"]
+  },
+  "entry_information": {
+    "foreign_national_fee": "fee_in_npr_and_user_currency",
+    "access_restrictions": "any_restrictions",
+    "visiting_hours": "operating_hours"
+  },
+  "key_experiences": [
+    {
+      "activity": "activity_name",
+      "timing": "best_time_to_visit",
+      "description": "detailed_description"
+    }
+  ],
+  "cultural_significance": "cultural_and_historical_context",
+  "visitor_guidelines": [
+    "guideline_1",
+    "guideline_2",
+    "guideline_3"
+  ],
+  "estimated_budget": {
+    "entry_fee": "amount_in_user_currency",
+    "transportation": "amount_range_in_user_currency",
+    "guide_optional": "amount_range_in_user_currency",
+    "total_estimate": "total_range_in_user_currency"
+  },
+  "currency_note": "Note: Amounts shown in USD as country-specific currency conversion unavailable" (only include if using USD for unrecognized country),
+  "best_visiting_time": "recommended_time_period",
+  "special_notes": "additional_important_information",
+  "interest_alignment": {
+    "applicable": true/false,
+    "matching_activities": ["activity_1", "activity_2"] or null,
+    "why_it_matches": "explanation_of_connection_mentioning_specific_interest" or null,
+    "personalized_recommendation": "tailored advice based on user's specific background and interests" or null
+  },
+  "personal_connection": "explanation of why this destination will resonate with the user's background, interests, or travel style"
+}
+
+PERSONALIZATION REQUIREMENTS:
+- Address user by name in personalized_greeting
+- Reference user's country of origin, interests, and background where relevant
+- Tailor recommendations based on user's specific profile
+- Make connections between user's interests and destination features
+- Use inclusive language that makes the user feel the content was created specifically for them
+- Include practical advice relevant to user's background and nationality
+
+INTEREST-BASED CONTENT RULES:
+- Only include "interest_alignment" section if the destination genuinely offers activities/experiences that match the specified visitor interests
+- Set "applicable": false if no meaningful connection exists
+- Be honest about limitations - not every place suits every interest
+- When interest alignment is applicable, specifically mention the user's interest in the explanation
+- Examples of interest categories: adventure sports, spiritual experiences, cultural immersion, nature photography, trekking, wildlife, historical exploration, local cuisine, traditional crafts
+- Only claim interest alignment if specific, verifiable activities exist at the destination
+- Include personalized_recommendation only when interest alignment is applicable
+
+VERIFICATION REQUIREMENTS:
+- Verify all prices, timings, and access information
+- Confirm transportation options are current and available in Nepal
+- Validate cultural and historical information
+- Check entry fees and restrictions
+- Ensure budget estimates reflect current rates
+- Only mention transportation services that actually operate in Nepal
+`;
+
+const API_URL = 'http://localhost:3000';
+
+// Currency mapping for different countries
+const CURRENCY_MAPPING = {
+  'USA': 'USD',
+  'United States': 'USD',
+  'Canada': 'CAD',
+  'UK': 'GBP',
+  'United Kingdom': 'GBP',
+  'Australia': 'AUD',
+  'India': 'INR',
+  'Germany': 'EUR',
+  'France': 'EUR',
+  'Italy': 'EUR',
+  'Spain': 'EUR',
+  'Japan': 'JPY',
+  'China': 'CNY',
+  'South Korea': 'KRW',
+  'Singapore': 'SGD',
+  'Thailand': 'THB',
+  'Malaysia': 'MYR',
+  'Philippines': 'PHP',
+  'Indonesia': 'IDR',
+  'Vietnam': 'VND',
+  'Bangladesh': 'BDT',
+  'Pakistan': 'PKR',
+  'Sri Lanka': 'LKR'
+};
+
+function GuideDisplay({ data }) {
+  if (!data) return null;
+  
+  let parsed;
+  let raw = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  
+  if (typeof data === 'string') {
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      // Try to extract JSON block
+      const firstBrace = data.indexOf('{');
+      const lastBrace = data.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        const jsonBlock = data.substring(firstBrace, lastBrace + 1);
+        try {
+          parsed = JSON.parse(jsonBlock);
+        } catch {
+          // Still invalid
+        }
+      }
+    }
+  } else {
+    parsed = data;
+  }
+
+  if (!parsed) {
+    return (
+      <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+        <div className="text-red-600 font-semibold mb-2">Invalid JSON response</div>
+        <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">{raw}</pre>
+      </div>
+    );
+  }
+
+  if (parsed.error) {
+    return (
+      <div className="bg-red-50 border border-red-200 p-6 rounded-lg shadow-md mt-6">
+        <div className="text-red-700 font-semibold mb-2">Error</div>
+        <p className="text-red-600">{parsed.error}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+      <h3 className="text-2xl font-bold text-blue-700 mb-2">{parsed.destination}</h3>
+      <p className="italic text-lg mb-4 text-green-700">{parsed.personalized_greeting}</p>
+      
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Overview</h4>
+        <p className="mt-2">{parsed.overview}</p>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Location</h4>
+        <div className="mt-2">
+          <p><strong>Distance from Kathmandu:</strong> {parsed.location?.distance_from_kathmandu}</p>
+          <p><strong>Transportation:</strong> {parsed.location?.transportation?.join(', ')}</p>
+        </div>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Entry Information</h4>
+        <ul className="list-disc ml-6 mt-2">
+          <li><strong>Foreign National Fee:</strong> {parsed.entry_information?.foreign_national_fee}</li>
+          <li><strong>Access Restrictions:</strong> {parsed.entry_information?.access_restrictions}</li>
+          <li><strong>Visiting Hours:</strong> {parsed.entry_information?.visiting_hours}</li>
+        </ul>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Key Experiences</h4>
+        <ul className="list-disc ml-6 mt-2">
+          {parsed.key_experiences?.map((exp, i) => (
+            <li key={i} className="mb-2">
+              <strong>{exp.activity}</strong> <span className="text-sm text-gray-500">({exp.timing})</span>
+              <div className="mt-1">{exp.description}</div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Cultural Significance</h4>
+        <p className="mt-2">{parsed.cultural_significance}</p>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Visitor Guidelines</h4>
+        <ul className="list-disc ml-6 mt-2">
+          {parsed.visitor_guidelines?.map((g, i) => <li key={i}>{g}</li>)}
+        </ul>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Estimated Budget</h4>
+        <ul className="list-disc ml-6 mt-2">
+          <li><strong>Entry Fee:</strong> {parsed.estimated_budget?.entry_fee}</li>
+          <li><strong>Transportation:</strong> {parsed.estimated_budget?.transportation}</li>
+          <li><strong>Guide (Optional):</strong> {parsed.estimated_budget?.guide_optional}</li>
+          <li><strong>Total Estimate:</strong> {parsed.estimated_budget?.total_estimate}</li>
+        </ul>
+        {parsed.currency_note && (
+          <p className="text-sm text-blue-600 mt-2 italic">{parsed.currency_note}</p>
+        )}
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Best Visiting Time</h4>
+        <p className="mt-2">{parsed.best_visiting_time}</p>
+      </section>
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Special Notes</h4>
+        <p className="mt-2">{parsed.special_notes}</p>
+      </section>
+
+      {parsed.interest_alignment && (
+        <section className="mb-4">
+          <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Interest Alignment</h4>
+          <div className="mt-2">
+            <p><strong>Applicable:</strong> {parsed.interest_alignment.applicable ? 'Yes' : 'No'}</p>
+            {parsed.interest_alignment.matching_activities && (
+              <p><strong>Matching Activities:</strong> {parsed.interest_alignment.matching_activities.join(', ')}</p>
+            )}
+            {parsed.interest_alignment.why_it_matches && (
+              <p><strong>Why it matches:</strong> {parsed.interest_alignment.why_it_matches}</p>
+            )}
+            {parsed.interest_alignment.personalized_recommendation && (
+              <div className="bg-blue-50 p-3 rounded mt-2">
+                <p><strong>Personalized Recommendation:</strong> {parsed.interest_alignment.personalized_recommendation}</p>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+
+      <section className="mb-4">
+        <h4 className="font-semibold text-gray-800 text-lg border-b pb-1">Personal Connection</h4>
+        <p className="mt-2 bg-green-50 p-3 rounded">{parsed.personal_connection}</p>
+      </section>
+    </div>
+  );
+}
+
+// 3. VirtualTourModal component (no emojis)
+// REPLACE with enhanced version with better error handling and geometry checks
+function VirtualTourModal({ isOpen, onClose, destination, coordinates }) {
+  const mapRef = useRef(null);
+  const streetViewRef = useRef(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [streetViewAvailable, setStreetViewAvailable] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [streetViewStatus, setStreetViewStatus] = useState('');
+
+  useEffect(() => {
+    if (isOpen && !mapLoaded && window.google) {
+      initializeMap();
+    }
+    // eslint-disable-next-line
+  }, [isOpen, mapLoaded]);
+
+  const initializeMap = () => {
+    if (!coordinates || !window.google) return;
+    
+    const position = { lat: coordinates.lat, lng: coordinates.lng };
+    const streetViewService = new window.google.maps.StreetViewService();
+    
+    // Multiple search strategies for better Street View detection
+    const searchStrategies = [
+      { location: position, radius: 50, source: window.google.maps.StreetViewSource.OUTDOOR },
+      { location: position, radius: 500, source: window.google.maps.StreetViewSource.OUTDOOR },
+      { location: position, radius: 1000, source: window.google.maps.StreetViewSource.OUTDOOR },
+      { location: position, radius: 1000, source: window.google.maps.StreetViewSource.DEFAULT },
+      { location: position, radius: 5000 }
+    ];
+
+    const tryStreetView = async (strategyIndex = 0) => {
+      if (strategyIndex >= searchStrategies.length) {
+        setLoading(false);
+        setStreetViewAvailable(false);
+        setStreetViewStatus('No Street View found within 5km radius');
+        createSatelliteView();
+        return;
+      }
+
+      const strategy = searchStrategies[strategyIndex];
+      setStreetViewStatus(`Searching... (Method ${strategyIndex + 1}/${searchStrategies.length})`);
+
+      streetViewService.getPanorama(strategy, (data, status) => {
+        console.log(`Street View attempt ${strategyIndex + 1}:`, status, data);
+        
+        if (status === 'OK' && data && data.location) {
+          setLoading(false);
+          setStreetViewAvailable(true);
+          setStreetViewStatus('Street View found!');
+          createStreetView(data, position);
+        } else {
+          setTimeout(() => tryStreetView(strategyIndex + 1), 200);
+        }
+      });
+    };
+
+    const createStreetView = (data, originalPosition) => {
+      // Ensure the DOM element exists before creating Street View
+      if (!streetViewRef.current) {
+        console.error('Street View container not available');
+        setStreetViewAvailable(false);
+        createSatelliteView();
+        return;
+      }
+
+      try {
+        // Create Street View panorama
+        const streetView = new window.google.maps.StreetViewPanorama(
+          streetViewRef.current,
+          {
+            position: data.location.latLng,
+            pov: { 
+              heading: window.google.maps.geometry ? 
+                google.maps.geometry.spherical.computeHeading(
+                  data.location.latLng, 
+                  originalPosition
+                ) || 0 : 0, 
+              pitch: 0 
+            },
+            zoom: 1,
+            addressControl: true,
+            linksControl: true,
+            panControl: true,
+            enableCloseButton: false,
+            fullscreenControl: true,
+            motionTracking: false,
+            motionTrackingControl: false,
+            showRoadLabels: true
+          }
+        );
+      
+      // Create regular map with both markers
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: originalPosition,
+        zoom: 16,
+        streetViewControl: true
+      });
+      
+      // Original destination marker (red)
+      const destinationMarker = new window.google.maps.Marker({
+        position: originalPosition,
+        map: map,
+        title: destination,
+        icon: {
+          url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+          scaledSize: new window.google.maps.Size(32, 32)
+        }
+      });
+      
+      // Street View location marker (blue) if different from destination
+      const streetViewPos = data.location.latLng;
+      let distance = 0;
+      if (window.google.maps.geometry) {
+        distance = window.google.maps.geometry.spherical.computeDistanceBetween(
+          originalPosition, streetViewPos
+        );
+      }
+      
+      if (distance > 10) {
+        const streetViewMarker = new window.google.maps.Marker({
+          position: streetViewPos,
+          map: map,
+          title: `Street View Location (${Math.round(distance)}m from destination)`,
+          icon: {
+            url: 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png',
+            scaledSize: new window.google.maps.Size(32, 32)
+          }
+        });
+        new window.google.maps.Polyline({
+          path: [originalPosition, streetViewPos],
+          geodesic: true,
+          strokeColor: '#FF0000',
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          map: map
+        });
+      }
+      
+      streetView.bindTo('position', destinationMarker, 'position');
+      map.setStreetView(streetView);
+      
+      setMapLoaded(true);
+      } catch (error) {
+        console.error('Error creating Street View:', error);
+        setStreetViewAvailable(false);
+        createSatelliteView();
+      }
+    };
+
+    const createSatelliteView = () => {
+      // Ensure containers exist before creating maps
+      if (!streetViewRef.current || !mapRef.current) {
+        console.error('Map containers not available');
+        return;
+      }
+
+      try {
+        // Create satellite/hybrid map when Street View is not available
+        const satelliteMap = new window.google.maps.Map(streetViewRef.current, {
+          center: position,
+          zoom: 18,
+          mapTypeId: window.google.maps.MapTypeId.HYBRID,
+          mapTypeControl: true,
+          mapTypeControlOptions: {
+            style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+            position: window.google.maps.ControlPosition.TOP_CENTER,
+            mapTypeIds: [
+              window.google.maps.MapTypeId.ROADMAP,
+              window.google.maps.MapTypeId.SATELLITE,
+              window.google.maps.MapTypeId.HYBRID,
+              window.google.maps.MapTypeId.TERRAIN
+            ]
+          },
+          zoomControl: true,
+          streetViewControl: true,
+          fullscreenControl: true
+        });
+        
+        new window.google.maps.Marker({
+          position: position,
+          map: satelliteMap,
+          title: destination,
+          icon: {
+            url: 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+            scaledSize: new window.google.maps.Size(32, 32)
+          }
+        });
+        
+        // Create overview map
+        const overviewMap = new window.google.maps.Map(mapRef.current, {
+          center: position,
+          zoom: 12,
+          mapTypeId: window.google.maps.MapTypeId.ROADMAP
+        });
+        
+        new window.google.maps.Marker({
+          position: position,
+          map: overviewMap,
+          title: destination
+        });
+        
+        setMapLoaded(true);
+      } catch (error) {
+        console.error('Error creating satellite view:', error);
+        setMapLoaded(true);
+      }
+    };
+
+    tryStreetView();
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-lg w-full max-w-6xl h-full max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center p-4 border-b">
+          <h3 className="text-xl font-bold text-gray-800">
+            {streetViewAvailable ? 'Virtual Tour' : 'Satellite View'}: {destination}
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+            aria-label="Close virtual tour"
+          >
+            ×
+          </button>
+        </div>
+        <div className="flex-1 p-4">
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading virtual tour...</p>
+                {streetViewStatus && (
+                  <p className="text-gray-500 text-sm mt-2">{streetViewStatus}</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="h-full grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="lg:col-span-2 h-full">
+                {streetViewAvailable ? (
+                  <div>
+                    <div className="bg-green-100 border border-green-300 p-2 rounded-lg mb-2">
+                      <p className="text-green-700 text-sm font-medium">
+                        🎯 360° Street View Found! Use mouse to look around, scroll to zoom, click arrows to move
+                      </p>
+                    </div>
+                    <div 
+                      ref={streetViewRef} 
+                      className="w-full h-full rounded-lg border-2 border-green-300"
+                      style={{ minHeight: '500px' }}
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <div className="bg-amber-100 border border-amber-300 p-2 rounded-lg mb-2">
+                      <p className="text-amber-700 text-sm font-medium">
+                        📍 {streetViewStatus} - Showing high-resolution satellite imagery
+                      </p>
+                    </div>
+                    <div 
+                      ref={streetViewRef} 
+                      className="w-full h-full rounded-lg border-2 border-amber-300"
+                      style={{ minHeight: '500px' }}
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <h4 className="font-semibold text-gray-800 mb-3">
+                  {streetViewAvailable ? 'Map Overview' : 'Area Overview'}
+                </h4>
+                <div 
+                  ref={mapRef} 
+                  className="w-full rounded-lg border"
+                  style={{ height: '300px' }}
+                />
+                <div className="mt-4">
+                  <h5 className="font-medium text-gray-700 mb-2">
+                    {streetViewAvailable ? 'Street View Tips:' : 'Map Controls:'}
+                  </h5>
+                  <ul className="text-sm text-gray-600 space-y-1">
+                    {streetViewAvailable ? (
+                      <>
+                        <li>🔄 Drag to look around in 360°</li>
+                        <li>🔍 Scroll to zoom in/out</li>
+                        <li>➡️ Click blue arrows to move along streets</li>
+                        <li>⛶ Use fullscreen for immersive view</li>
+                        <li>🗺️ Red marker shows your destination</li>
+                      </>
+                    ) : (
+                      <>
+                        <li>🗺️ Switch map types using top controls</li>
+                        <li>🔍 Scroll to zoom, drag to pan</li>
+                        <li>📍 Red marker shows exact location</li>
+                        <li>👁️ Try Street View control if available</li>
+                        <li>⛶ Use fullscreen for detailed view</li>
+                      </>
+                    )}
+                  </ul>
+                </div>
+                
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                  <h6 className="font-medium text-blue-800 text-sm mb-1">
+                    {streetViewAvailable ? '✅ Street View Active' : '🔍 Street View Search'}
+                  </h6>
+                  <p className="text-blue-700 text-xs">
+                    {streetViewAvailable 
+                      ? 'Google Street View imagery found for this location. You can explore the area virtually!'
+                      : 'Searched multiple radii and sources. This location may be in a remote area, private property, or recently developed region where Street View cars haven\'t been.'
+                    }
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 4. getPlaceCoordinates function (robust: uses new Places API v3, with fallback)
+const getPlaceCoordinates = async (placeName, placeId = null) => {
+  if (!GOOGLE_MAPS_API_KEY) {
+    console.error('Google Maps API key not found');
+    return null;
+  }
+  // Wait for Google Maps API to be loaded
+  if (!window.google || !window.google.maps || !window.google.maps.places) {
+    await loadGoogleMapsAPI();
+  }
+  // Helper: Geocode fallback
+  const geocodeByName = async (name) => {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(name + ', Nepal')}&key=${GOOGLE_MAPS_API_KEY}`
+      );
+      const data = await response.json();
+      if (data.status === 'OK' && data.results.length > 0) {
+        const location = data.results[0].geometry.location;
+        return { lat: location.lat, lng: location.lng };
+      }
+    } catch (err) {
+      console.error('Geocoding fallback error:', err);
+    }
+    return null;
+  };
+  // Try new Place API if placeId is provided
+  if (placeId) {
+    try {
+      const { Place } = await google.maps.importLibrary("places");
+      const place = new Place({
+        id: placeId,
+        requestedLanguage: 'en',
+      });
+      await place.fetchFields({
+        fields: ['displayName', 'location']
+      });
+      if (place.location) {
+        return {
+          lat: place.location.lat(),
+          lng: place.location.lng()
+        };
+      }
+    } catch (error) {
+      console.error('Place details error:', error);
+      // Fallback to geocoding if Place API fails
+      const geo = await geocodeByName(placeName);
+      return geo;
+    }
+  }
+  // Use Place Search API for finding places by text query
+  try {
+    const { Place } = await google.maps.importLibrary("places");
+    // Use the searchByText method from the new Places API
+    const request = {
+      textQuery: placeName + ', Nepal',
+      fields: ['displayName', 'location'],
+      language: 'en',
+      maxResultCount: 1,
+      region: 'np', // Nepal country code
+    };
+    const { places } = await Place.searchByText(request);
+    if (places && places.length > 0 && places[0].location) {
+      return {
+        lat: places[0].location.lat(),
+        lng: places[0].location.lng()
+      };
+    }
+  } catch (error) {
+    console.error('Place search error:', error);
+  }
+  // Final fallback to geocoding
+  return await geocodeByName(placeName);
+};
+// Google Maps API load state to ensure single load
+let googleMapsApiPromise = null;
+// 5. loadGoogleMapsAPI function (updated for new libraries)
+const loadGoogleMapsAPI = () => {
+  // If already loaded, resolve immediately
+  if (window.google && window.google.maps) {
+    return Promise.resolve();
+  }
+  // If already loading, return the same promise
+  if (googleMapsApiPromise) {
+    return googleMapsApiPromise;
+  }
+  // Otherwise, start loading with updated libraries
+  googleMapsApiPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=places,geometry&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Google Maps API'));
+    document.head.appendChild(script);
+  });
+  return googleMapsApiPromise;
+};
+
+export default function SearchPage() {
+  const [user, setUser] = useState({ name: '', country: '' });
+  const [userInterests, setUserInterests] = useState([]);
+  const [currentLocation, setCurrentLocation] = useState('');
+  const [destination, setDestination] = useState('');
+  const [response, setResponse] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [storageAvailable, setStorageAvailable] = useState(false);
+  const [searchProgress, setSearchProgress] = useState('');
+  const [useGoogleSearch, setUseGoogleSearch] = useState(true);
+  const [showVirtualTour, setShowVirtualTour] = useState(false);
+  const [tourCoordinates, setTourCoordinates] = useState(null);
+  const [mapsApiLoaded, setMapsApiLoaded] = useState(false);
+  const navigate = useNavigate();
+  const destinationInputRef = useRef(null);
+
+  // Check if localStorage is available
+  const isLocalStorageAvailable = () => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const test = 'test';
+        window.localStorage.setItem(test, test);
+        window.localStorage.removeItem(test);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    const checkStorage = isLocalStorageAvailable();
+    setStorageAvailable(checkStorage);
+    
+    if (!checkStorage) {
+      // Set demo data when localStorage is not available (like in Claude artifacts)
+      setUser({ name: 'Demo User', country: 'USA' });
+      setUserInterests(['trekking', 'photography', 'cultural sites']);
+      setError('Demo Mode: Using sample user data. In your deployed app, this will fetch real user data.');
+      // Set demo location
+      setCurrentLocation('Kathmandu');
+      return;
+    }
+
+    // Automatically detect user's location using Geolocation API
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          // Use reverse geocoding to get city name
+          const { latitude, longitude } = position.coords;
+          try {
+            const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`);
+            const data = await res.json();
+            if (data.status === 'OK' && data.results.length > 0) {
+              // Try to find locality (city)
+              const cityComponent = data.results[0].address_components.find(comp => comp.types.includes('locality'));
+              const city = cityComponent ? cityComponent.long_name : data.results[0].formatted_address;
+              setCurrentLocation(city);
+            } else {
+              setCurrentLocation('');
+            }
+          } catch {
+            setCurrentLocation('');
+          }
+        },
+        (error) => {
+          setCurrentLocation('');
+        }
+      );
+    } else {
+      setCurrentLocation('');
+    }
+
+    const fetchUserAndInterests = async () => {
+      const token = localStorage.getItem('token');
+      const userId = localStorage.getItem('userId');
+      
+      if (!token || !userId) {
+        setError('Please log in to access personalized content');
+        return;
+      }
+
+      try {
+        // Fetch user info
+        const userRes = await fetch(`${API_URL}/api/user/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const userData = await userRes.json();
+        setUser({ name: userData.name, country: userData.country });
+
+        // Fetch user interests
+        const intRes = await fetch(`${API_URL}/api/preference/${userId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const interestData = await intRes.json();
+        // Map to string values if interestData.interest is array of objects
+        setUserInterests(
+          Array.isArray(interestData?.interest)
+            ? interestData.interest.map(i => typeof i === 'string' ? i : i.interests)
+            : []
+        );
+      } catch (err) {
+        setError('Failed to fetch user info or interests',err);
+      }
+    };
+
+    if (checkStorage) {
+      fetchUserAndInterests();
+    }
+  }, []);
+
+  useEffect(() => {
+    // Only call loadGoogleMapsAPI once in the app lifecycle
+    if (GOOGLE_MAPS_API_KEY && !mapsApiLoaded) {
+      loadGoogleMapsAPI()
+        .then(() => {
+          setMapsApiLoaded(true);
+        })
+        .catch(error => {
+          console.error('Failed to load Google Maps API:', error);
+        });
+    }
+    // eslint-disable-next-line
+  }, []);
+
+  // Add Places Autocomplete for destination input (updated for new API)
+  useEffect(() => {
+    if (mapsApiLoaded && destinationInputRef.current && window.google && window.google.maps.places) {
+      const setupAutocomplete = async () => {
+        try {
+          const { Autocomplete } = await google.maps.importLibrary("places");
+          const autocomplete = new Autocomplete(destinationInputRef.current, {
+            componentRestrictions: { country: 'np' },
+            fields: ['place_id', 'name', 'displayName']
+          });
+          autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (place && (place.name || place.displayName)) {
+              const placeName = place.displayName || place.name;
+              setDestination(placeName);
+              // Store place_id for robust lookup
+              destinationInputRef.current.dataset.placeId = place.place_id || '';
+            }
+          });
+          return () => {
+            google.maps.event.clearInstanceListeners(destinationInputRef.current);
+          };
+        } catch (error) {
+          console.error('Autocomplete setup error:', error);
+          // Fallback to legacy autocomplete if new API fails
+          const autocomplete = new window.google.maps.places.Autocomplete(destinationInputRef.current, {
+            componentRestrictions: { country: 'np' },
+          });
+          autocomplete.addListener('place_changed', () => {
+            const place = autocomplete.getPlace();
+            if (place && place.name) {
+              setDestination(place.name);
+              destinationInputRef.current.dataset.placeId = place.place_id || '';
+            }
+          });
+        }
+      };
+      setupAutocomplete();
+    }
+  }, [mapsApiLoaded]);
+  
+
+  // Function to perform Google Search via Gemini API
+  const performGoogleSearch = async (searchQuery) => {
+    const searchPayload = {
+      contents: [{
+        parts: [{ 
+          text: `Search for current information about: ${searchQuery}. Provide recent, accurate details about entry fees, transportation options, operating hours, and current conditions. Focus on official and reliable sources.` 
+        }]
+      }],
+      tools: [{
+        googleSearchRetrieval: {
+          searchQualities: ["HIGH_QUALITY"]
+        }
+      }],
+      generationConfig: {
+        temperature: 0.3,
+        topK: 40,
+        topP: 0.95,
+        maxOutputTokens: 1500,
+      }
+    };
+
+    try {
+      const searchRes = await fetch(`${GEMINI_SEARCH_API_URL}?key=${GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(searchPayload)
+      });
+
+      const searchData = await searchRes.json();
+      if (searchRes.ok && searchData?.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return searchData.candidates[0].content.parts[0].text;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Google Search failed:', err);
+      return null;
+    }
+  };
+
+  const handleSubmit = async () => {
+    setError("");
+    setResponse("");
+    setLoading(true);
+    setSearchProgress('');
+
+    const interestsString = userInterests.length > 0 ? userInterests.join(', ') : 'general tourism';
+    const userCurrency = CURRENCY_MAPPING[user.country] || 'USD';
+    
+    let searchResults = '';
+    
+    // Perform Google Search if enabled
+    if (useGoogleSearch) {
+      setSearchProgress('Searching for current information...');
+      
+      const searchQueries = [
+        `${destination} Nepal entry fee 2024 2025 current prices`,
+        `${destination} Nepal transportation how to reach 2024`,
+        `${destination} Nepal visiting hours opening times current`,
+        `${destination} Nepal travel guide recent information`
+      ];
+
+      const searchPromises = searchQueries.map(query => performGoogleSearch(query));
+      const results = await Promise.all(searchPromises);
+      
+      searchResults = results.filter(result => result).join('\n\n');
+      setSearchProgress('Generating personalized content...');
+    }
+
+    const enhancedPrompt = `${SYSTEM_PROMPT}
+
+${searchResults ? `CURRENT SEARCH RESULTS FOR REFERENCE:
+${searchResults}
+
+Use this current information to verify and update details like entry fees, transportation options, and operating hours. Ensure all information is as current as possible.
+
+` : ''}
+`;
+
+    // ...rest of your handleSubmit function and component...
+  };
+
+  return (
+    <div className="container mx-auto p-4">
+      <h1 className="text-4xl font-bold text-blue-700 mb-4">Nepal Tourism Guide</h1>
+      <p className="text-lg text-gray-700 mb-6">
+        Discover the best of Nepal with our comprehensive tourism guide. Whether you're planning a trip to Kathmandu, Pokhara, or the Himalayas, we've got you covered.
+      </p>
+
+      <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <input
+          type="text"
+          ref={destinationInputRef}
+          placeholder="Enter a destination (e.g., Pokhara, Everest Base Camp, Lumbini)"
+          className="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          onClick={handleSubmit}
+          className="p-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={loading}
+        >
+          {loading ? 'Searching...' : 'Get Guide'}
+        </button>
+      </div>
+
+      {error && <p className="text-red-600 mb-4">{error}</p>}
+      {searchProgress && <p className="text-blue-600 mb-4">{searchProgress}</p>}
+
+      {response && (
+        <div className="bg-white p-6 rounded-lg shadow-md mt-6">
+          <h2 className="text-2xl font-bold text-blue-700 mb-4">Your Guide to {destination}</h2>
+          <GuideDisplay data={response} />
+        </div>
+      )}
+
+      {showVirtualTour && tourCoordinates && (
+        <VirtualTourModal
+          isOpen={showVirtualTour}
+          onClose={() => setShowVirtualTour(false)}
+          destination={destination}
+          coordinates={tourCoordinates}
+        />
+      )}
+    </div>
+  );
+}

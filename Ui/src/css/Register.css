@@ -1,0 +1,36 @@
+
+@keyframes subtle-float {
+  0%, 100% { transform: translate(0, 0) scale(1.01); }
+  50% { transform: translate(-5px, -5px) scale(1); }
+}
+
+@keyframes form-appear {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-subtle-float {
+  animation: subtle-float 20s ease-in-out infinite;
+}
+
+.animate-form-appear {
+  animation: form-appear 0.8s ease-out forwards;
+}
+
+.slide-in-right {
+  animation: slide-in-right 0.5s ease-out forwards;
+}
+
+.slide-in-left {
+  animation: slide-in-left 0.5s ease-out forwards;
+}
