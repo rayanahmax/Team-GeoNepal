@@ -5,7 +5,7 @@ const GoogleReverseGeocode = () => {
   const [address, setAddress] = useState('');
   const [error, setError] = useState('');
 
-  const GOOGLE_API_KEY = 'AIzaSyDXRHvW4xMAOIN9yKyfF_n6u-BZBCJ7QXA'; // 🔒 Replace this securely
+  const GOOGLE_API_KEY = ''; // 🔒 Replace this securely
 
   useEffect(() => {
     const watchId = navigator.geolocation.watchPosition(
