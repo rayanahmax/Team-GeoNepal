@@ -1,7 +1,7 @@
 import React from 'react'
 import Register from './Pages/Register'
 import Login from './Pages/Login'
-
+import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import { Routes, Route } from "react-router-dom";
 import Interest from './Pages/Interest';
 import Home from './Pages/Home';
